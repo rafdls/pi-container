@@ -1,0 +1,32 @@
+services:
+  pi-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    working_dir: /workspace
+
+    volumes:
+      # The only host project directory Pi can see.
+      - ${WORKSPACE_DIR:-./empty-workspace}:/workspace
+
+      # Pi's agent config (AGENT.md, skills, extensions), version controlled
+      # separately on the host. Resolved by bin/pi-agent (defaults to ~/.pi/agent).
+      - ${PI_AGENT_DIR}:/home/piagent/.pi/agent
+
+      # macOS Docker Desktop SSH agent forwarding.
+      # This lets git push/pull via your host SSH agent without copying SSH keys into the container.
+      - /run/host-services/ssh-auth.sock:/run/host-services/ssh-auth.sock
+
+      # Optional: persist Pi's own config/sessions separately from your Mac home directory.
+      - pi-agent-home:/home/piagent
+
+    environment:
+      SSH_AUTH_SOCK: /run/host-services/ssh-auth.sock
+      HOME: /home/piagent
+
+    stdin_open: true
+    tty: true
+
+volumes:
+  pi-agent-home:
