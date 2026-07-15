@@ -14,6 +14,8 @@ if [ $# -lt 1 ]; then
 fi
 
 WORKSPACE_DIR="$(cd "$1" && pwd)"
+shift
+PI_ARGS=("$@")
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -32,4 +34,4 @@ PI_AGENT_DIR="$(cd "$PI_AGENT_DIR_INPUT" && pwd)"
 
 cd "$REPO_ROOT"
 
-WORKSPACE_DIR="$WORKSPACE_DIR" PI_AGENT_DIR="$PI_AGENT_DIR" docker compose run --rm pi-agent pi
+WORKSPACE_DIR="$WORKSPACE_DIR" PI_AGENT_DIR="$PI_AGENT_DIR" docker compose run --rm pi-agent pi "${PI_ARGS[@]}"
