@@ -84,6 +84,21 @@ git push
 
 Git push/pull works through the host SSH agent socket. Your private SSH keys are not copied into the container.
 
+### Commit identity
+
+Your commit identity (name and email) comes from your own host `~/.gitconfig`,
+mounted read-only into the container by `bin/pi-agent`. Nothing is hard-coded or
+committed to this repo, so each developer commits under their own identity.
+
+If your host has no `~/.gitconfig`, an empty config is used instead (git will
+prompt you to set `user.name`/`user.email` before committing). Set them on the
+host with:
+
+```sh
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+```
+
 ## Pi config
 
 Pi config should be created inside the container under:

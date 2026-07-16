@@ -32,6 +32,16 @@ PI_AGENT_DIR_INPUT="${PI_AGENT_DIR_INPUT/#\~/$HOME}"
 mkdir -p "$PI_AGENT_DIR_INPUT"
 PI_AGENT_DIR="$(cd "$PI_AGENT_DIR_INPUT" && pwd)"
 
+# Source the developer's own host git identity (name/email) read-only so commits
+# made inside the container are attributed correctly. Nothing is hard-coded or
+# committed to this repo. If the host has no ~/.gitconfig, fall back to /dev/null,
+# which git reads as an empty config (no identity, no error).
+if [ -f "$HOME/.gitconfig" ]; then
+  HOST_GITCONFIG="$HOME/.gitconfig"
+else
+  HOST_GITCONFIG=/dev/null
+fi
+
 cd "$REPO_ROOT"
 
-WORKSPACE_DIR="$WORKSPACE_DIR" PI_AGENT_DIR="$PI_AGENT_DIR" docker compose run --rm pi-agent pi "${PI_ARGS[@]}"
+WORKSPACE_DIR="$WORKSPACE_DIR" PI_AGENT_DIR="$PI_AGENT_DIR" HOST_GITCONFIG="$HOST_GITCONFIG" docker compose run --rm pi-agent pi "${PI_ARGS[@]}"

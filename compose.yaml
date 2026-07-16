@@ -18,6 +18,11 @@ services:
       # This lets git push/pull via your host SSH agent without copying SSH keys into the container.
       - /run/host-services/ssh-auth.sock:/run/host-services/ssh-auth.sock
 
+      # Each developer's own host git identity (name/email), read-only.
+      # Resolved by bin/pi-agent; falls back to /dev/null when the host has no
+      # ~/.gitconfig. This is per-developer and never committed to the repo.
+      - ${HOST_GITCONFIG:-/dev/null}:/home/piagent/.gitconfig:ro
+
       # Optional: persist Pi's own config/sessions separately from your Mac home directory.
       - pi-agent-home:/home/piagent
 
