@@ -4,11 +4,11 @@ services:
       context: .
       dockerfile: Dockerfile
 
-    working_dir: /workspace
+    working_dir: /workspace/${WORKSPACE_NAME:-empty-workspace}
 
     volumes:
       # The only host project directory Pi can see.
-      - ${WORKSPACE_DIR:-./empty-workspace}:/workspace
+      - ${WORKSPACE_DIR:-./empty-workspace}:/workspace/${WORKSPACE_NAME:-empty-workspace}
 
       # Pi's agent config (AGENT.md, skills, extensions), version controlled
       # separately on the host. Resolved by bin/pi-agent (defaults to ~/.pi/agent).

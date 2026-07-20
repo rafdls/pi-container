@@ -1,0 +1,71 @@
+# Plan: Version control pi extensions/skills for the pi-container project
+
+## Context / findings
+- Git repo lives at `~/.pi/agent` (the mounted, version-controlled dir).
+- `.gitignore` excludes: `sessions/*`, `.DS_STORE`, `auth.json`, `settings.json`.
+- `settings.json` holds BOTH personal state (theme, defaultProvider, defaultModel,
+  defaultThinkingLevel, lastChangelogVersion) AND the `packages` array
+  (`npm:pi-native-search`). This is why it is gitignored, and why installed
+  extensions are lost on a new machine.
+- Skills (`skills/`) and `AGENTS.md` are already tracked, so they survive.
+- `npm/` holds the materialised install cache and is NOT gitignored yet.
+- `auth.json` correctly stays out of git (secrets).
+
+## Problem
+Package declarations (what pi should install) are trapped inside a gitignored file
+mixed with machine-specific preferences. Git cannot ignore part of a file, so we
+must separate the "what to install" manifest from personal settings.
+
+## Chosen approach
+Keep `settings.json` gitignored (it carries personal/volatile state), and record
+the package list in a small versioned bootstrap that re-installs them on a new
+machine. Add the install cache to gitignore. This keeps a single source of truth
+for the package list under version control without leaking preferences.
+
+Rejected alternatives:
+- Commit `settings.json` wholesale: mixes personal prefs + churny
+  `lastChangelogVersion` into git. No secrets today, but couples config to machine.
+- Partial-file gitignore: not possible in git.
+
+---
+
+## Commit 1 - "chore: ignore pi package install cache"
+- [ ] Add `npm/` (and `git/` for future git-sourced packages) to
+      `~/.pi/agent/.gitignore`.
+- [ ] Confirm `git status` no longer shows the install cache.
+
+>>> git commit <<<
+(review: cache ignored, nothing else newly ignored)
+
+## Commit 2 - "chore: add versioned pi package manifest + bootstrap"
+- [ ] Create `packages.txt` (one pi source per line, e.g. `npm:pi-native-search`)
+      at repo root as the human-editable source of truth.
+- [ ] Create `bootstrap.sh` that reads `packages.txt` and runs
+      `pi install <source>` for each line (skips blanks/`#` comments).
+- [ ] Make `bootstrap.sh` executable.
+- [ ] Document in `AGENTS.md` (or a short `README`) that:
+      - installed packages must be added to `packages.txt`,
+      - a new machine runs `bootstrap.sh` once to restore extensions.
+
+>>> git commit <<<
+(review: manifest lists current packages, script runs `pi install` per line)
+
+## Commit 3 - "docs: record new-machine setup steps"  (optional, can fold into #2)
+- [ ] Short setup section: clone/mount `~/.pi`, run `bootstrap.sh`, personal
+      prefs in `settings.json` are set per-machine and intentionally not tracked.
+
+>>> git commit <<<
+
+---
+
+## Final verification
+- [ ] Simulate a fresh machine: temporarily move `settings.json` aside, remove
+      `npm/`, run `bootstrap.sh`, confirm `pi list` shows `pi-native-search`.
+- [ ] Restore original `settings.json`.
+- [ ] Confirm `git status` is clean and no secrets are staged.
+
+## Open questions for you
+1. Prefer a `packages.txt` + `bootstrap.sh` manifest, or would you rather just
+   commit `settings.json` and accept sharing personal prefs?
+2. Any git-sourced or local-path packages planned? (Affects what `bootstrap.sh`
+   and `.gitignore` need to cover.)
