@@ -72,6 +72,28 @@ Other repos
 Desktop/Documents/etc
 ```
 
+## Android builds and tests
+
+The container ships JDK 17 and the Android SDK, so it can build the app and run
+JVM unit tests.
+
+It runs as `linux/amd64` (see `compose.yaml`) because AGP only ships an x86_64
+AAPT2 binary. On Apple Silicon, enable Rosetta in Docker Desktop; builds are
+slower under emulation.
+
+The committed `local.properties` has a host `sdk.dir` that doesn't exist here.
+Fix it before building:
+
+```sh
+echo "sdk.dir=$ANDROID_HOME" > local.properties
+./gradlew :app:assembleDebug
+./gradlew testDebugUnitTest
+```
+
+UI/instrumented tests (`connectedDebugAndroidTest`) don't run here: no emulator
+or device, and emulators need `/dev/kvm`, unavailable on Docker Desktop. Run
+those on a real device/emulator or a cloud device farm.
+
 ## Git usage inside the container
 
 Inside the container:

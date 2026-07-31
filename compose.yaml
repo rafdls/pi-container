@@ -1,5 +1,8 @@
 services:
   pi-agent:
+    # AGP only ships an x86_64 AAPT2 binary, so the Android build cannot run on
+    # an arm64 image. Force amd64 (emulated via Rosetta on Apple Silicon).
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile
