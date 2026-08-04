@@ -1,23 +1,78 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ $# -lt 1 ]; then
+usage() {
   echo "Usage:"
-  echo "  bin/pi-agent /absolute/path/to/project"
+  echo "  bin/pi-agent <dir1> [dir2 ...] [-- <pi args>]"
   echo ""
-  echo "Example:"
+  echo "Examples:"
   echo "  bin/pi-agent ~/dev/my-project"
+  echo "  bin/pi-agent ~/dev/my-project -- chat"
+  echo "  bin/pi-agent ~/dev/app ~/dev/shared-lib ~/dev/config -- some pi args"
+  echo ""
+  echo "Everything before -- is a host directory to mount; the first is the"
+  echo "primary workspace (working dir). Each directory is mounted at"
+  echo "/workspace/<basename>, so basenames must be unique. Everything after"
+  echo "-- is passed to pi."
   echo ""
   echo "Pi's agent config directory (AGENT.md, skills, extensions) defaults to"
   echo "~/.pi/agent. Override it by setting PI_AGENT_DIR in .env."
+}
+
+if [ $# -lt 1 ]; then
+  usage
   exit 1
 fi
 
-WORKSPACE_DIR="$(cd "$1" && pwd)"
-WORKSPACE_NAME="$(basename "$WORKSPACE_DIR")"
+# Split args into mount directories (before --) and pi args (after --).
+MOUNT_DIRS=()
+PI_ARGS=()
+seen_separator=0
+for arg in "$@"; do
+  if [ "$seen_separator" -eq 1 ]; then
+    PI_ARGS+=("$arg")
+  elif [ "$arg" = "--" ]; then
+    seen_separator=1
+  else
+    MOUNT_DIRS+=("$arg")
+  fi
+done
 
-shift
-PI_ARGS=("$@")
+if [ "${#MOUNT_DIRS[@]}" -lt 1 ]; then
+  echo "Error: at least one directory to mount is required." >&2
+  echo "" >&2
+  usage >&2
+  exit 1
+fi
+
+# Resolve directories, reject non-directories, and detect basename collisions.
+EXTRA_MOUNTS=()
+declare -A seen_names=()
+WORKSPACE_DIR=""
+WORKSPACE_NAME=""
+for dir in "${MOUNT_DIRS[@]}"; do
+  if [ ! -d "$dir" ]; then
+    echo "Error: not a directory: $dir" >&2
+    exit 1
+  fi
+  abs_dir="$(cd "$dir" && pwd)"
+  name="$(basename "$abs_dir")"
+  if [ -n "${seen_names[$name]:-}" ]; then
+    echo "Error: duplicate mount name \"$name\" (both map to /workspace/$name):" >&2
+    echo "  ${seen_names[$name]}" >&2
+    echo "  $abs_dir" >&2
+    exit 1
+  fi
+  seen_names[$name]="$abs_dir"
+
+  if [ -z "$WORKSPACE_DIR" ]; then
+    # First directory is the primary workspace, mounted via compose.yaml.
+    WORKSPACE_DIR="$abs_dir"
+    WORKSPACE_NAME="$name"
+  else
+    EXTRA_MOUNTS+=("-v" "$abs_dir:/workspace/$name")
+  fi
+done
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -46,4 +101,4 @@ fi
 
 cd "$REPO_ROOT"
 
-WORKSPACE_DIR="$WORKSPACE_DIR" WORKSPACE_NAME="$WORKSPACE_NAME" PI_AGENT_DIR="$PI_AGENT_DIR" HOST_GITCONFIG="$HOST_GITCONFIG" docker compose run --rm pi-agent pi "${PI_ARGS[@]}"
+WORKSPACE_DIR="$WORKSPACE_DIR" WORKSPACE_NAME="$WORKSPACE_NAME" PI_AGENT_DIR="$PI_AGENT_DIR" HOST_GITCONFIG="$HOST_GITCONFIG" docker compose run --rm "${EXTRA_MOUNTS[@]}" pi-agent pi "${PI_ARGS[@]}"

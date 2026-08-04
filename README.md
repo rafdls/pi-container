@@ -1,6 +1,7 @@
 # Pi Container
 
-Run Pi inside a Docker Compose container while mounting only one selected project directory.
+Run Pi inside a Docker Compose container while mounting one or more selected
+project directories.
 
 ## Requirements
 
@@ -26,6 +27,28 @@ docker compose build pi-agent
 bin/pi-agent ~/dev/my-project
 ```
 
+Everything before `--` is a host directory to mount; the first directory is the
+primary workspace and the container's working dir. Everything after `--` is
+passed straight to `pi`:
+
+```sh
+bin/pi-agent ~/dev/my-project -- chat
+```
+
+### Mount multiple directories
+
+List several directories before `--` to mount them all. Each is mounted at
+`/workspace/<basename>`, so their basenames must be unique:
+
+```sh
+bin/pi-agent ~/dev/app ~/dev/shared-lib ~/dev/config -- some pi args
+```
+
+- `app` (first) is the primary workspace at `/workspace/app` and working dir.
+- `shared-lib` is mounted at `/workspace/shared-lib`.
+- `config` is mounted at `/workspace/config`.
+- `some pi args` is forwarded to `pi`.
+
 By default this also mounts your host's `~/.pi/agent/` directory (containing
 `AGENT.md`, `skills/`, and `extensions/`) into the container, so your Pi
 customizations can be version controlled independently of any single project.
@@ -43,10 +66,11 @@ Inside the container:
 pi
 ```
 
-The mounted project is available at:
+The mounted projects are available under `/workspace`, each at its own
+basename:
 
 ```sh
-/workspace
+/workspace/<name>
 ```
 
 ## What Pi can access
@@ -54,7 +78,7 @@ The mounted project is available at:
 Pi can access:
 
 ```text
-/workspace              the mounted project
+/workspace/<name>       each mounted project directory, by its basename
 /home/piagent/.pi/agent your version-controlled Pi agent config (AGENT.md, skills, extensions)
 internet                enabled by Docker Compose by default
 git remotes             via forwarded SSH agent
