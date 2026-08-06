@@ -52,18 +52,6 @@ PI_AGENT_DIR=~/dev/my-pi-agent-config
 
 Your host Git configuration and SSH agent are available inside the container, but private SSH keys and other host files are not mounted.
 
-## Android projects
-
-The container includes JDK 17 and the Android SDK. Before building an Android project, point Gradle at the container SDK:
-
-```sh
-echo "sdk.dir=$ANDROID_HOME" > local.properties
-./gradlew :app:assembleDebug
-./gradlew testDebugUnitTest
-```
-
-Instrumented tests require a device or emulator and cannot run in the container. On Apple Silicon, enable Rosetta in Docker Desktop because Android's AAPT2 binary requires x86_64 emulation.
-
 ## Maintenance
 
 Rebuild without the Docker cache:
