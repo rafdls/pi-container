@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # Install Pi coding agent.
-RUN npm install -g @earendil-works/pi-coding-agent@0.83.0
+RUN npm install -g @earendil-works/pi-coding-agent@0.84.2
 
 # Create a non-root user.
 RUN useradd -m -s /bin/bash piagent
