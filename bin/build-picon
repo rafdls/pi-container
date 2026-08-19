@@ -5,8 +5,8 @@ set -euo pipefail
 # name picon looks up so a local build is used instead of the published image.
 #
 # Usage:
-#   bin/build             # normal build (uses the Docker layer cache)
-#   bin/build --no-cache  # force a fresh build, ignoring the cache
+#   bin/build-picon             # normal build (uses the Docker layer cache)
+#   bin/build-picon --no-cache  # force a fresh build, ignoring the cache
 
 PICON_IMAGE="${PICON_IMAGE:-ghcr.io/rafdls/pi-container:latest}"
 

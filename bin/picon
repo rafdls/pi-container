@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Run the Pi coding agent in a container with access only to the directories
 # you mount. Installed standalone, so this script never builds an image; use
-# bin/build from a clone of the repository if you want to build one locally.
+# bin/build-picon from a clone of the repository if you want to build one locally.
 
 PICON_VERSION="1.0.0"
 PICON_IMAGE="${PICON_IMAGE:-ghcr.io/rafdls/pi-container:latest}"
@@ -56,7 +56,7 @@ require_docker() {
 pull_image() {
   echo "Pulling $PICON_IMAGE ..." >&2
   docker pull "$PICON_IMAGE" >&2 \
-    || die "could not pull $PICON_IMAGE. Check your network, or build the image locally with bin/build from a clone of the repository."
+    || die "could not pull $PICON_IMAGE. Check your network, or build the image locally with bin/build-picon from a clone of the repository."
 }
 
 # Download the image the first time it is needed. A locally built image with the
