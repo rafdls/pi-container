@@ -1,67 +1,84 @@
-# Pi Container
+# pi-container
 
-Run Pi in a Docker sandbox with access only to the project directories you mount.
+`picon` runs the [Pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) inside a container that can only see the directories you hand it. Everything else on your machine, including your SSH keys, browser profiles and the rest of your home directory, stays out of reach.
 
 ## Requirements
 
-- Docker Desktop or OrbStack
-- Git configured on the host
-- Your SSH key loaded into the host SSH agent
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) or [OrbStack](https://orbstack.dev)
+- Git configured on the host, so commits made in the container carry your name and email
+- An SSH key loaded into the host SSH agent, if you want to push and pull over SSH
 
-## Setup
-
-Build the container:
+## Install
 
 ```sh
-bin/build-pi-agent
+curl -fsSL https://raw.githubusercontent.com/rafdls/pi-container/main/install.sh | sh
 ```
 
-Add this repository's `bin/` directory to your `PATH`. For example, add the following to `~/.zshrc`, replacing the path with the location of this repository:
+This installs the `picon` command to `~/.local/bin`. The container image downloads on your first run.
+
+<details>
+<summary>Build the image yourself instead</summary>
+
+Use this if you want to change the Dockerfile or pin a different Pi version.
 
 ```sh
-export PATH="$HOME/Projects/pi-container/bin:$PATH"
+git clone https://github.com/rafdls/pi-container.git
+cd pi-container
+bin/build
+export PATH="$PWD/bin:$PATH"
 ```
 
-Restart your shell, then start Pi with a project mounted in sandbox mode:
+`bin/build` tags the image with the same name `picon` looks for, so `picon` uses your local build and never downloads anything. Everything below works the same either way.
+
+</details>
+
+## Use
+
+Start Pi with one project mounted:
 
 ```sh
-pi-agent ~/dev/your-project
+picon ~/dev/your-project
 ```
 
-The first directory is Pi's working directory. Mount multiple directories by listing them:
+The first directory is Pi's working directory. Mount more by listing them:
 
 ```sh
-pi-agent ~/dev/your-project ~/dev/another-project
+picon ~/dev/your-project ~/dev/shared-lib
 ```
 
-Each directory is available at `/workspace/<directory-name>`. Directory names must be unique.
-
-Pass arguments directly to Pi after `--`:
+Each directory appears at `/workspace/<directory-name>`, so the names must be unique. Pass arguments to Pi after `--`:
 
 ```sh
-pi-agent ~/dev/your-project -- "Hello prompt"
+picon ~/dev/your-project -- "Hello prompt"
 ```
 
 ## Configuration
 
-By default, `~/.pi/agent` is mounted into the container for your `AGENT.md`, skills and extensions. Override it in `.env`:
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PI_AGENT_DIR` | `~/.pi/agent` | Your `AGENT.md`, skills and extensions, mounted into the container |
+| `PICON_IMAGE` | `ghcr.io/rafdls/pi-container:latest` | The image to run |
 
-```sh
-PI_AGENT_DIR=~/dev/my-pi-agent-config
-```
+Shared with the container: the directories you list, your agent config, your Git name and email (read-only), and your SSH agent.
 
-Your host Git configuration and SSH agent are available inside the container, but private SSH keys and other host files are not mounted.
+Not shared: your home directory, your private SSH keys, and every other directory on the host.
 
 ## Maintenance
 
-Rebuild without the Docker cache:
+Update to the latest image:
 
 ```sh
-bin/build-pi-agent --no-cache
+picon --pull
 ```
 
-Reset the container's Pi configuration:
+Reset Pi's own state, such as its sessions and credentials:
 
 ```sh
-docker compose down -v
+docker volume rm picon-home
+```
+
+If you built from source, rebuild without the layer cache:
+
+```sh
+bin/build --no-cache
 ```
