@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run the Pi coding agent in a container with access only to the directories
-# you mount. Installed standalone, so this script never builds an image; use
-# bin/build-picon from a clone of the repository if you want to build one locally.
+# Run the Pi coding agent in a container with access only to the directories you
+# mount. Installed standalone, so this script never builds an image; use
+# bin/build-picon from a clone of the repository to build one locally.
+#
+# Targets bash 3.2, the version macOS ships, so there are no associative arrays.
 
 PICON_VERSION="1.0.0"
+# Keep this default in sync with bin/build-picon, which tags what it builds.
 PICON_IMAGE="${PICON_IMAGE:-ghcr.io/rafdls/pi-container:latest}"
 PICON_HOME_VOLUME="picon-home"
 
-# Path Docker Desktop and OrbStack expose the host SSH agent on, inside the container.
+# Where Docker Desktop and OrbStack expose the host SSH agent inside the container.
 CONTAINER_SSH_SOCK=/run/host-services/ssh-auth.sock
 
 usage() {
@@ -41,8 +44,19 @@ Environment:
 USAGE
 }
 
+warn() {
+  echo "Warning: $1" >&2
+}
+
+# Prints the first argument as the error, then any further arguments as detail
+# lines, and exits.
 die() {
   echo "Error: $1" >&2
+  shift
+  local line
+  for line in "$@"; do
+    echo "$line" >&2
+  done
   exit 1
 }
 
@@ -59,153 +73,165 @@ pull_image() {
     || die "could not pull $PICON_IMAGE. Check your network, or build the image locally with bin/build-picon from a clone of the repository."
 }
 
-# Download the image the first time it is needed. A locally built image with the
-# same name is used as-is and never overwritten by a pull.
-ensure_image() {
-  if docker image inspect "$PICON_IMAGE" >/dev/null 2>&1; then
-    return 0
-  fi
-  pull_image
-}
-
-if [ $# -lt 1 ]; then
-  usage >&2
-  exit 1
-fi
-
-# Split arguments into mount directories (before --) and pi arguments (after --).
-# Options are read anywhere before --, so an option that follows a directory is
-# not taken for another directory to mount.
+# Set by parse_args.
 MOUNT_DIRS=()
 PI_ARGS=()
-seen_separator=0
-for arg in "$@"; do
-  if [ "$seen_separator" -eq 1 ]; then
-    PI_ARGS+=("$arg")
-    continue
-  fi
-  case "$arg" in
-    --)
-      seen_separator=1
-      ;;
-    --help | -h)
-      usage
-      exit 0
-      ;;
-    --version)
-      echo "picon $PICON_VERSION"
-      echo "image $PICON_IMAGE"
-      exit 0
-      ;;
-    --pull)
-      require_docker
-      pull_image
-      exit 0
-      ;;
-    -*)
-      die "unknown option: $arg. Run picon --help for usage."
-      ;;
-    *)
-      MOUNT_DIRS+=("$arg")
-      ;;
-  esac
-done
 
-if [ "${#MOUNT_DIRS[@]}" -lt 1 ]; then
-  echo "Error: at least one directory to mount is required." >&2
-  echo "" >&2
-  usage >&2
-  exit 1
-fi
+# Directories to mount come before --, arguments for pi come after it. Options
+# are read anywhere before --, so an option that follows a directory is not
+# taken for another directory to mount.
+parse_args() {
+  local arg
+  local seen_separator=0
 
-# Resolve directories, reject non-directories, and detect basename collisions.
-# Two parallel indexed arrays rather than an associative one, because macOS
-# ships bash 3.2, which has no `declare -A`.
-MOUNT_ARGS=()
-seen_names=()
-seen_paths=()
-WORKSPACE_NAME=""
-for dir in "${MOUNT_DIRS[@]}"; do
-  [ -d "$dir" ] || die "not a directory: $dir"
-  abs_dir="$(cd "$dir" && pwd -P)"
-  name="$(basename "$abs_dir")"
-  for i in ${seen_names[@]+"${!seen_names[@]}"}; do
-    if [ "${seen_names[$i]}" = "$name" ]; then
-      echo "Error: duplicate mount name \"$name\" (both map to /workspace/$name):" >&2
-      echo "  ${seen_paths[$i]}" >&2
-      echo "  $abs_dir" >&2
-      exit 1
+  for arg in "$@"; do
+    if [ "$seen_separator" -eq 1 ]; then
+      PI_ARGS+=("$arg")
+      continue
     fi
+    case "$arg" in
+      --)
+        seen_separator=1
+        ;;
+      --help | -h)
+        usage
+        exit 0
+        ;;
+      --version)
+        echo "picon $PICON_VERSION"
+        echo "image $PICON_IMAGE"
+        exit 0
+        ;;
+      --pull)
+        require_docker
+        pull_image
+        exit 0
+        ;;
+      -*)
+        die "unknown option: $arg. Run picon --help for usage."
+        ;;
+      *)
+        MOUNT_DIRS+=("$arg")
+        ;;
+    esac
   done
-  seen_names+=("$name")
-  seen_paths+=("$abs_dir")
 
-  # The first directory is the primary workspace and sets the working directory.
-  [ -n "$WORKSPACE_NAME" ] || WORKSPACE_NAME="$name"
-  MOUNT_ARGS+=("-v" "$abs_dir:/workspace/$name")
-done
+  if [ "${#MOUNT_DIRS[@]}" -lt 1 ]; then
+    usage >&2
+    echo "" >&2
+    die "at least one directory to mount is required."
+  fi
+}
 
-require_docker
+# Set by resolve_mounts.
+MOUNT_ARGS=()
+WORKSPACE_NAME=""
 
-# Pi's agent configuration, version controlled separately on the host.
-PI_AGENT_DIR_INPUT="${PI_AGENT_DIR:-$HOME/.pi/agent}"
-PI_AGENT_DIR_INPUT="${PI_AGENT_DIR_INPUT/#\~/$HOME}"
-mkdir -p "$PI_AGENT_DIR_INPUT"
-PI_AGENT_DIR_RESOLVED="$(cd "$PI_AGENT_DIR_INPUT" && pwd -P)"
-MOUNT_ARGS+=("-v" "$PI_AGENT_DIR_RESOLVED:/home/piagent/.pi/agent")
+# Each directory is mounted at /workspace/<basename>, so basenames must be
+# unique. The first directory is the primary workspace and sets the working
+# directory. Resolved names and paths are tracked as tab separated lines,
+# because bash 3.2 has no associative arrays.
+resolve_mounts() {
+  local dir abs_dir name previous
+  local resolved=""
 
-# Pi's own state, kept in a named volume rather than on the host.
-MOUNT_ARGS+=("-v" "$PICON_HOME_VOLUME:/home/piagent")
+  for dir in "$@"; do
+    [ -d "$dir" ] || die "not a directory: $dir"
+    abs_dir="$(cd "$dir" && pwd -P)"
+    name="$(basename "$abs_dir")"
+
+    previous="$(printf '%s' "$resolved" | awk -F'\t' -v want="$name" '$1 == want { print $2 }')"
+    [ -z "$previous" ] || die \
+      "duplicate mount name \"$name\" (both map to /workspace/$name):" \
+      "  $previous" \
+      "  $abs_dir"
+    resolved="${resolved}${name}"$'\t'"${abs_dir}"$'\n'
+
+    [ -n "$WORKSPACE_NAME" ] || WORKSPACE_NAME="$name"
+    MOUNT_ARGS+=("-v" "$abs_dir:/workspace/$name")
+  done
+}
+
+# Pi's agent configuration lives on the host, version controlled separately.
+mount_agent_dir() {
+  local configured resolved
+  configured="${PI_AGENT_DIR:-$HOME/.pi/agent}"
+  configured="${configured/#\~/$HOME}"
+  mkdir -p "$configured"
+  resolved="$(cd "$configured" && pwd -P)"
+  MOUNT_ARGS+=("-v" "$resolved:/home/piagent/.pi/agent")
+}
+
+# Container environment. Extended by mount_ssh_agent.
+ENV_ARGS=("-e" "HOME=/home/piagent")
+
+# Extra docker run flags. Set by mount_ssh_agent.
+EXTRA_ARGS=()
 
 # Forward the host SSH agent so git push and pull work without copying keys into
 # the container. Docker Desktop and OrbStack forward the macOS agent to a fixed
 # path inside their VM, which does not exist on the host filesystem and so is
 # mounted by path rather than checked for. A macOS host socket cannot be bind
 # mounted directly, so any other daemon there gets no agent at all.
-ENV_ARGS=("-e" "HOME=/home/piagent")
-EXTRA_ARGS=()
-case "$(uname -s):$(docker info --format '{{.OperatingSystem}}' 2>/dev/null)" in
-  Darwin:*"Docker Desktop"* | Darwin:*OrbStack*)
-    MOUNT_ARGS+=("-v" "$CONTAINER_SSH_SOCK:$CONTAINER_SSH_SOCK")
-    ENV_ARGS+=("-e" "SSH_AUTH_SOCK=$CONTAINER_SSH_SOCK")
-    # Docker Desktop owns the forwarded socket as root:root with mode 660, so the
-    # non-root container user needs group 0 to read it.
-    EXTRA_ARGS+=("--group-add" "0")
-    ;;
-  Darwin:*)
-    echo "Warning: SSH agent forwarding needs Docker Desktop or OrbStack on macOS. Git over SSH will not work inside the container." >&2
-    ;;
-  *)
-    if [ -S "${SSH_AUTH_SOCK:-}" ]; then
-      MOUNT_ARGS+=("-v" "$SSH_AUTH_SOCK:$CONTAINER_SSH_SOCK")
+mount_ssh_agent() {
+  case "$(uname -s):$(docker info --format '{{.OperatingSystem}}' 2>/dev/null)" in
+    Darwin:*"Docker Desktop"* | Darwin:*OrbStack*)
+      MOUNT_ARGS+=("-v" "$CONTAINER_SSH_SOCK:$CONTAINER_SSH_SOCK")
       ENV_ARGS+=("-e" "SSH_AUTH_SOCK=$CONTAINER_SSH_SOCK")
-    else
-      echo "Warning: no SSH agent found. Git over SSH will not work inside the container." >&2
-    fi
-    ;;
-esac
+      # Docker Desktop owns the forwarded socket as root:root with mode 660, so
+      # the non-root container user needs group 0 to read it.
+      EXTRA_ARGS+=("--group-add" "0")
+      ;;
+    Darwin:*)
+      warn "SSH agent forwarding needs Docker Desktop or OrbStack on macOS. Git over SSH will not work inside the container."
+      ;;
+    *)
+      if [ -S "${SSH_AUTH_SOCK:-}" ]; then
+        MOUNT_ARGS+=("-v" "$SSH_AUTH_SOCK:$CONTAINER_SSH_SOCK")
+        ENV_ARGS+=("-e" "SSH_AUTH_SOCK=$CONTAINER_SSH_SOCK")
+      else
+        warn "no SSH agent found. Git over SSH will not work inside the container."
+      fi
+      ;;
+  esac
+}
 
-# The host git identity (name and email), read-only, so commits made inside the
-# container are attributed correctly. Git reads /dev/null as an empty config.
-HOST_GITCONFIG=/dev/null
-if [ -f "$HOME/.gitconfig" ]; then
-  HOST_GITCONFIG="$HOME/.gitconfig"
-fi
-MOUNT_ARGS+=("-v" "$HOST_GITCONFIG:/home/piagent/.gitconfig:ro")
+# The host git identity, read-only, so commits made inside the container are
+# attributed correctly. Git reads /dev/null as an empty config.
+mount_gitconfig() {
+  local source=/dev/null
+  [ ! -f "$HOME/.gitconfig" ] || source="$HOME/.gitconfig"
+  MOUNT_ARGS+=("-v" "$source:/home/piagent/.gitconfig:ro")
+}
 
-ensure_image
+main() {
+  parse_args "$@"
+  require_docker
 
-# -t only with a terminal on both ends, so `picon dir -- ... < input` still runs.
-TTY_ARGS=("-i")
-if [ -t 0 ] && [ -t 1 ]; then
-  TTY_ARGS+=("-t")
-fi
+  resolve_mounts "${MOUNT_DIRS[@]}"
+  mount_agent_dir
+  # Pi's own state, kept in a named volume rather than on the host.
+  MOUNT_ARGS+=("-v" "$PICON_HOME_VOLUME:/home/piagent")
+  mount_ssh_agent
+  mount_gitconfig
 
-exec docker run --rm \
-  "${TTY_ARGS[@]}" \
-  --workdir "/workspace/$WORKSPACE_NAME" \
-  ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} \
-  "${MOUNT_ARGS[@]}" \
-  "${ENV_ARGS[@]}" \
-  "$PICON_IMAGE" \
-  pi ${PI_ARGS[@]+"${PI_ARGS[@]}"}
+  # A locally built image with the same name is used as-is, never replaced by a pull.
+  docker image inspect "$PICON_IMAGE" >/dev/null 2>&1 || pull_image
+
+  # -t only with a terminal on both ends, so `picon dir -- ... < input` still runs.
+  local tty_args=("-i")
+  if [ -t 0 ] && [ -t 1 ]; then
+    tty_args+=("-t")
+  fi
+
+  exec docker run --rm \
+    "${tty_args[@]}" \
+    --workdir "/workspace/$WORKSPACE_NAME" \
+    ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} \
+    "${MOUNT_ARGS[@]}" \
+    "${ENV_ARGS[@]}" \
+    "$PICON_IMAGE" \
+    pi ${PI_ARGS[@]+"${PI_ARGS[@]}"}
+}
+
+main "$@"
