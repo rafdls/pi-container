@@ -68,40 +68,47 @@ ensure_image() {
   pull_image
 }
 
-case "${1:-}" in
-  --help | -h)
-    usage
-    exit 0
-    ;;
-  --version)
-    echo "picon $PICON_VERSION"
-    echo "image $PICON_IMAGE"
-    exit 0
-    ;;
-  --pull)
-    require_docker
-    pull_image
-    exit 0
-    ;;
-esac
-
 if [ $# -lt 1 ]; then
   usage >&2
   exit 1
 fi
 
 # Split arguments into mount directories (before --) and pi arguments (after --).
+# Options are read anywhere before --, so an option that follows a directory is
+# not taken for another directory to mount.
 MOUNT_DIRS=()
 PI_ARGS=()
 seen_separator=0
 for arg in "$@"; do
   if [ "$seen_separator" -eq 1 ]; then
     PI_ARGS+=("$arg")
-  elif [ "$arg" = "--" ]; then
-    seen_separator=1
-  else
-    MOUNT_DIRS+=("$arg")
+    continue
   fi
+  case "$arg" in
+    --)
+      seen_separator=1
+      ;;
+    --help | -h)
+      usage
+      exit 0
+      ;;
+    --version)
+      echo "picon $PICON_VERSION"
+      echo "image $PICON_IMAGE"
+      exit 0
+      ;;
+    --pull)
+      require_docker
+      pull_image
+      exit 0
+      ;;
+    -*)
+      die "unknown option: $arg. Run picon --help for usage."
+      ;;
+    *)
+      MOUNT_DIRS+=("$arg")
+      ;;
+  esac
 done
 
 if [ "${#MOUNT_DIRS[@]}" -lt 1 ]; then
@@ -120,7 +127,7 @@ seen_paths=()
 WORKSPACE_NAME=""
 for dir in "${MOUNT_DIRS[@]}"; do
   [ -d "$dir" ] || die "not a directory: $dir"
-  abs_dir="$(cd "$dir" && pwd)"
+  abs_dir="$(cd "$dir" && pwd -P)"
   name="$(basename "$abs_dir")"
   for i in ${seen_names[@]+"${!seen_names[@]}"}; do
     if [ "${seen_names[$i]}" = "$name" ]; then
@@ -138,34 +145,45 @@ for dir in "${MOUNT_DIRS[@]}"; do
   MOUNT_ARGS+=("-v" "$abs_dir:/workspace/$name")
 done
 
+require_docker
+
 # Pi's agent configuration, version controlled separately on the host.
 PI_AGENT_DIR_INPUT="${PI_AGENT_DIR:-$HOME/.pi/agent}"
 PI_AGENT_DIR_INPUT="${PI_AGENT_DIR_INPUT/#\~/$HOME}"
 mkdir -p "$PI_AGENT_DIR_INPUT"
-PI_AGENT_DIR_RESOLVED="$(cd "$PI_AGENT_DIR_INPUT" && pwd)"
+PI_AGENT_DIR_RESOLVED="$(cd "$PI_AGENT_DIR_INPUT" && pwd -P)"
 MOUNT_ARGS+=("-v" "$PI_AGENT_DIR_RESOLVED:/home/piagent/.pi/agent")
 
 # Pi's own state, kept in a named volume rather than on the host.
 MOUNT_ARGS+=("-v" "$PICON_HOME_VOLUME:/home/piagent")
 
 # Forward the host SSH agent so git push and pull work without copying keys into
-# the container. On macOS, Docker Desktop and OrbStack expose the agent at a
-# fixed path that does not exist on the host filesystem, so it is mounted by
-# path rather than checked for. Elsewhere, mount the host's own agent socket.
+# the container. Docker Desktop and OrbStack forward the macOS agent to a fixed
+# path inside their VM, which does not exist on the host filesystem and so is
+# mounted by path rather than checked for. A macOS host socket cannot be bind
+# mounted directly, so any other daemon there gets no agent at all.
 ENV_ARGS=("-e" "HOME=/home/piagent")
 EXTRA_ARGS=()
-if [ "$(uname -s)" = "Darwin" ]; then
-  MOUNT_ARGS+=("-v" "$CONTAINER_SSH_SOCK:$CONTAINER_SSH_SOCK")
-  ENV_ARGS+=("-e" "SSH_AUTH_SOCK=$CONTAINER_SSH_SOCK")
-  # Docker Desktop owns the forwarded socket as root:root with mode 660, so the
-  # non-root container user needs group 0 to read it.
-  EXTRA_ARGS+=("--group-add" "0")
-elif [ -S "${SSH_AUTH_SOCK:-}" ]; then
-  MOUNT_ARGS+=("-v" "$SSH_AUTH_SOCK:$CONTAINER_SSH_SOCK")
-  ENV_ARGS+=("-e" "SSH_AUTH_SOCK=$CONTAINER_SSH_SOCK")
-else
-  echo "Warning: no SSH agent found. Git over SSH will not work inside the container." >&2
-fi
+case "$(uname -s):$(docker info --format '{{.OperatingSystem}}' 2>/dev/null)" in
+  Darwin:*"Docker Desktop"* | Darwin:*OrbStack*)
+    MOUNT_ARGS+=("-v" "$CONTAINER_SSH_SOCK:$CONTAINER_SSH_SOCK")
+    ENV_ARGS+=("-e" "SSH_AUTH_SOCK=$CONTAINER_SSH_SOCK")
+    # Docker Desktop owns the forwarded socket as root:root with mode 660, so the
+    # non-root container user needs group 0 to read it.
+    EXTRA_ARGS+=("--group-add" "0")
+    ;;
+  Darwin:*)
+    echo "Warning: SSH agent forwarding needs Docker Desktop or OrbStack on macOS. Git over SSH will not work inside the container." >&2
+    ;;
+  *)
+    if [ -S "${SSH_AUTH_SOCK:-}" ]; then
+      MOUNT_ARGS+=("-v" "$SSH_AUTH_SOCK:$CONTAINER_SSH_SOCK")
+      ENV_ARGS+=("-e" "SSH_AUTH_SOCK=$CONTAINER_SSH_SOCK")
+    else
+      echo "Warning: no SSH agent found. Git over SSH will not work inside the container." >&2
+    fi
+    ;;
+esac
 
 # The host git identity (name and email), read-only, so commits made inside the
 # container are attributed correctly. Git reads /dev/null as an empty config.
@@ -175,10 +193,16 @@ if [ -f "$HOME/.gitconfig" ]; then
 fi
 MOUNT_ARGS+=("-v" "$HOST_GITCONFIG:/home/piagent/.gitconfig:ro")
 
-require_docker
 ensure_image
 
-exec docker run --rm -it \
+# -t only with a terminal on both ends, so `picon dir -- ... < input` still runs.
+TTY_ARGS=("-i")
+if [ -t 0 ] && [ -t 1 ]; then
+  TTY_ARGS+=("-t")
+fi
+
+exec docker run --rm \
+  "${TTY_ARGS[@]}" \
   --workdir "/workspace/$WORKSPACE_NAME" \
   ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} \
   "${MOUNT_ARGS[@]}" \
