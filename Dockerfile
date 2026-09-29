@@ -17,9 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zsh \
   && rm -rf /var/lib/apt/lists/*
 
-# Install Pi coding agent. Override with --build-arg PI_VERSION=<version>.
-ARG PI_VERSION=0.84.2
-RUN npm install -g "@earendil-works/pi-coding-agent@${PI_VERSION}"
+# Install Pi coding agent.
+RUN npm install -g @earendil-works/pi-coding-agent@0.87.1
 
 # Create a non-root user.
 RUN useradd -m -s /bin/bash piagent
