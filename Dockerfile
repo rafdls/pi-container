@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     fd-find \
     git \
+    gh \
     jq \
     less \
     openssh-client \
@@ -18,7 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # Install Pi coding agent.
-RUN npm install -g @earendil-works/pi-coding-agent@0.87.1
+RUN npm install -g @earendil-works/pi-coding-agent@1.5.0
 
 # Create a non-root user.
 RUN useradd -m -s /bin/bash piagent
